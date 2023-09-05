@@ -1,0 +1,321 @@
+pragma solidity >=0.8.4;
+
+contract IPIdentifier{
+    struct IPInfo{
+        string IPIdentifier;
+        uint256 ttl;
+        uint256 registerTime;
+        string metadataFilePath;
+    }
+
+    address owner;
+    address emis;
+    mapping(string => IPInfo) IpRecords;
+    mapping(string => bool) revokedIp;
+    mapping(string => uint) remainTime;
+    string private constant IP_IDENTIFIER = "type5";
+
+    constructor(){
+        owner = msg.sender;
+    }
+
+    /**
+     * @dev Permits modifications only owner.
+     */
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
+
+    /**
+     * @dev Sets EMIS contract address.
+     * @param emisAddr Emis contract address.
+     */
+    function setEMISAddr(address emisAddr) public onlyOwner{
+        emis = emisAddr;
+    }
+
+    /**
+     * @dev Permits modifications only emis contract.
+     */
+    // modifier OnlyEMIS(){
+    //     require((msg.sender == emis)||(msg.sender == owner));
+    //     _;
+    // }
+
+    /**
+     * @dev Query whether the username's IP identifier is in expiry date.
+     * @param username The specified username.
+     * @return True if username's IP identifier is activc, false otherwise.
+     */
+    function isActive(string calldata username)
+        public
+        view
+        returns(bool)
+    {
+        return IpRecords[username].ttl > block.timestamp;
+    }
+
+    /**
+     * @dev Permits modifications only when the username is active.
+     */
+    modifier active(string calldata username)  {
+        require(isActive(username));
+        _;
+    }
+
+    /**
+     * @dev Query whether the username's IP identifier is revoked.
+     * @param username The specified username.
+     * @return True if username's IP identifier is revoked.
+     */
+    function isRevoked(string calldata username)
+        public 
+        view 
+        returns(bool)
+    {
+        return revokedIp[username];
+    }
+
+    /**
+     * @dev Permits modifications only when the username's IP identifier is revoked.
+     */
+    modifier revoked(string calldata username){
+        require(isRevoked(username));
+        _;
+    }
+
+    /**
+     * @dev Permits modifications only when the username's IP identifier is not revoked.
+     */
+    modifier notRevoked(string calldata username){
+        require(!isRevoked(username));
+        _;
+    }
+
+
+    /**
+     * @dev Register a IP, set the username's owner and ttl.
+     * @param username The name that user want to registry.
+     * @param IPIdentifier The _longitude of the IP identifier.
+     * @param expiryTime The time that user register.
+     */
+    function registerIP(
+        string calldata username,
+        string calldata IPIdentifier,
+        uint256 expiryTime
+    // ) public OnlyEMIS{
+    ) public {
+        IpRecords[username].IPIdentifier = IPIdentifier;
+        IpRecords[username].registerTime = block.timestamp;
+        // If the IP identifier is registered for the first time:
+        // ttl: current block.timestamp + expiryTime
+        if(IpRecords[username].ttl == 0){
+            IpRecords[username].ttl = block.timestamp + expiryTime;
+        }
+        // If the IP identifier is registered and within the validity period:
+        // ttl: original ttl + expiryTime
+        else if(IpRecords[username].ttl > block.timestamp){
+            IpRecords[username].ttl += expiryTime;
+        }
+        // If the IP identifier has expired:
+        // ttl: current block.timestamp + expiryTime
+        else{
+            IpRecords[username].ttl = block.timestamp + expiryTime;
+        }
+    }
+
+
+    /**
+     * @dev Sets the IP Identifier's contract address for the username.
+     * @param username The specified username.
+     * @param IPIdentifier The address of the IP identifier's contranct address.
+     */
+    function setIPIdentifier(string calldata username,string calldata IPIdentifier) public  active(username) {
+        IpRecords[username].IPIdentifier = IPIdentifier;
+    }
+    /**
+     * @dev Extend the use of the registered IP identifier of the specified username according to payTime.
+     * @param username The specified username.
+     * @param payTime The time that user wants to extend.
+     */
+    function renewal(string calldata username,uint256 payTime) public  notRevoked(username){
+        // If the IP identifier is registered for the first time:
+        // ttl: current block.timestamp + expiryTime
+        if(IpRecords[username].ttl == 0){
+            IpRecords[username].ttl = block.timestamp + payTime;
+        }
+        // If the IP identifier is registered and within the validity period:
+        // ttl: original ttl + expiryTime
+        else if(IpRecords[username].ttl > block.timestamp){
+            IpRecords[username].ttl += payTime;
+        }
+        // If the IP identifier has expired:
+        // ttl: current block.timestamp + expiryTime
+        else{
+            IpRecords[username].ttl = block.timestamp + payTime;
+        }
+    }
+
+
+    /**
+     * @dev Returns the reamining time of the username's IP identifier.
+     * @param username The specified username.
+     * @return remainTime of the username's IP identifier.
+     */
+    function remainT(string calldata username) 
+        public 
+        view 
+        returns(uint)
+    {
+        uint reaminTime = IpRecords[username].ttl-block.timestamp;
+        return reaminTime;
+    }
+
+    /**
+     * @dev Revoke the IP identifier of the specified username and
+            stop billing to keep the effective usage time.
+     * @param username The specified username.
+     */
+    function revoke(string calldata username) public  notRevoked(username){
+        revokedIp[username] = true;
+        remainTime[username] = IpRecords[username].ttl - block.timestamp;
+        IpRecords[username].ttl = 0;
+    }
+
+    /**
+     * @dev Restart the IP identifier of the specified username that 
+            is already revoked by revoke function and start billing again.
+     * @param username The specified username.
+     */
+    function restart(string calldata username) public  revoked(username){
+        revokedIp[username] = false;
+        IpRecords[username].ttl = block.timestamp + remainTime[username];
+        remainTime[username] = 0;
+    }
+
+    /**
+     * @dev Sets the ttl of username's IP identifier to 0, it equals to delete the identifier.
+     * @param username The specified username.
+     */
+    function deleteIPIdentifier(string calldata username) public  notRevoked(username){
+        IpRecords[username].ttl =0;
+    }
+
+
+    /**
+     * @dev Returns the IP identifier of the specified username.
+     * @param username The specified username.
+     * @return IPIdentifier The string of the username's IP identifier.
+     */
+    function getIPIdentifier(string calldata username) 
+        public 
+        view 
+        returns(string memory)
+    {
+        return string(abi.encodePacked(IP_IDENTIFIER,":",IpRecords[username].IPIdentifier));
+    }
+
+
+    /**
+     * @dev Returns the resolved content identifier by Username.
+     * @param username The specified username.
+     * @return IPIdentifier The string of the username's content identifier.
+     */
+    function resolveIPIdentifierByUsername(string calldata username) 
+        public 
+        view 
+        returns(string memory) 
+    {
+        return string(abi.encodePacked(IpRecords[username].IPIdentifier));
+    }
+
+    // /**
+    //  * @dev Returns the resolved content identifier by identifierContent.
+    //  * @param identifierContent The identifier's content.
+    //  * @return result The string of the username's content identifier.
+    //  */
+    // function resolvecontentByIdentifier(string calldata identifierContent) 
+    //     public 
+    //     view 
+    //     returns(string memory result) 
+    // {
+    //     result = string(abi.encodePacked("0x",identifierContent));
+    //     return result;
+    // }
+
+
+    /**
+     * @dev Returns the register time of the specified username's IP identifier.
+     * @param username The specified username.
+     * @return timestamp The timestamp of registering username's IP identifier.
+     */
+    function registerTime(string calldata username) 
+        public 
+        view 
+        returns(uint256)
+    {
+        return IpRecords[username].registerTime;
+    }
+
+
+    /**
+     * @dev Returns the TTL of the specified username.
+     * @param username The specified username.
+     * @return ttl The ttl of the username.
+     */
+    function ttl(string calldata username) 
+        public 
+        view 
+        returns(uint256)
+    {
+        return IpRecords[username].ttl;
+    }
+
+    /**
+     * @dev Returns the metadata file path of the specified username.
+     * @param username The specified username.
+     * @return metadataFilePath The metadata file path of the username.
+     */
+    function metadataFilePath(string calldata username)
+        public
+        view
+        returns(string memory)
+    {
+        return IpRecords[username].metadataFilePath;
+    }
+
+//     /**
+//      * @dev Transfer an address to string.
+//      * @param x The address that want to be transfered.
+//      * @return string of the address
+//      */
+//     function toString(address x) 
+//         public 
+//         pure 
+//         returns(string memory)
+//     {
+//         return toString(abi.encodePacked(x));
+//     }
+
+//     /**
+//      * @dev Transfer the bytes data to string.
+//      * @param data The bytes that want to be transfered.
+//      * @return string of the data
+//      */
+//     function toString(bytes memory data) 
+//         public 
+//         pure 
+//         returns(string memory) 
+//     {
+//         bytes memory alphabet = "0123456789abcdef";
+//         bytes memory str = new bytes(2 + data.length * 2);
+//         // str[0] = "0";
+//         // str[1] = "x";
+//         for (uint i = 0; i < data.length; i++) {
+//             str[2+i*2] = alphabet[uint(uint8(data[i] >> 4))];
+//             str[3+i*2] = alphabet[uint(uint8(data[i] & 0x0f))];
+//         }
+//         return string(str);
+//     }
+}
